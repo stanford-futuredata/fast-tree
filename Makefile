@@ -10,7 +10,7 @@ all:
 
 
 debug:
-	$(CC) $(CFLAGS) -O0 -g -DDEBUG $(INCLUDES) main.cpp -o $(TARGET)
+	$(CC) $(CFLAGS) -O0 -g -D_GLIBCXX_DEBUG -DDEBUG $(INCLUDES) main.cpp -o $(TARGET)
 
 asm:
 	$(CC) $(CFLAGS) $(INCLUDES) main.cpp -S

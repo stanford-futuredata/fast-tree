@@ -10,6 +10,7 @@
 #include <memory>
 #include <stdint.h>
 #include <string.h>
+#include <vector>
 
 // Checks if bit i is set in n.
 #define IS_SET(n, i) (n & (0x1L << i))
@@ -109,7 +110,7 @@ int evaluate_tree_simd(node_t* tree, float* test_input)
  * field; the left child offset is always in the same relative location to the
  * parent node
  **/
-float evaluate_tree_regression_yelp_no_cover(std::unique_ptr<node_t[]>& tree, float* test_input)
+float evaluate_tree_regression_yelp_no_cover(std::vector<node_t>& tree, float* test_input)
 {
   int curr_offset = 0;
   node_t curr = tree[curr_offset];
@@ -143,6 +144,63 @@ int evaluate_tree_regression_treelite(node_t*, float*)
   return 0;
 }
 
+std::vector<node_t> read_model_no_cover(std::string filename)
+{
+  std::ifstream infile(filename.c_str(), std::ios_base::in);
+  std::vector<node_t> vec;
+
+  std::string line;
+  if (infile) {
+    while (std::getline(infile, line)) {
+      if (line.find("booster[") == 0) {
+        continue;
+      }
+      auto start = line.find_first_not_of(" \t");
+      line = line.substr(start);
+
+      auto colon_index = line.find_first_of(":");
+      const int node_index = std::stoi(line.substr(0, colon_index));
+      if (node_index >= (int)vec.size()) {
+        vec.resize(node_index + 1);
+      }
+      line = line.substr(colon_index + 1);
+
+      if (line.find("leaf=") == 0) {
+        // leaf node
+        auto comma_index = line.find_first_of(",");
+        const float split_value = std::stof(line.substr(5, comma_index - 5));
+        vec[node_index] = { split_value, 0, -1 };
+
+      } else {
+        auto f_index = line.find_first_of("f");
+        auto lt_index = line.find_first_of("<");
+        const int feature_index = std::stoi(line.substr(f_index + 1, lt_index - f_index));
+
+        auto rb_index = line.find_first_of("]");
+        const float split_value = std::stof(line.substr(lt_index + 1, rb_index - lt_index));
+        line = line.substr(rb_index + 6); // strip "] yes="
+
+        auto comma_index = line.find_first_of(",");
+        auto yes_value = stoi(line.substr(0, comma_index));
+        line = line.substr(comma_index + 4); // strip ",no="
+        comma_index = line.find_first_of(",");
+        auto no_value = stoi(line.substr(0, comma_index));
+        line = line.substr(comma_index + 9); // strip ",missing="
+        comma_index = line.find_first_of(",");
+        auto missing_value = stoi(line.substr(0, comma_index));
+
+        if (missing_value == yes_value) {
+          vec[node_index] = { split_value, node_index * 2 + 2, feature_index << 1 };
+        } else if (missing_value == no_value) {
+          vec[node_index] = { split_value, node_index * 2 + 2, ((feature_index << 1) | 0x1) };
+        }
+      }
+    }
+  }
+  infile.close();
+  return vec;
+}
+
 /**
  * booster[0]:
  * 0:[f1<50.4594994] yes=1,no=2,missing=1,gain=540253,cover=452099.844
@@ -162,10 +220,9 @@ int evaluate_tree_regression_treelite(node_t*, float*)
  * 			14:leaf=-0.0119630694,cover=923.46814
  **/
 // child offset always points to the right child
-std::unique_ptr<node_t[]> create_model_no_cover()
+std::vector<node_t> create_model_no_cover()
 {
-  std::unique_ptr<node_t[]> arr = std::make_unique<node_t[]>(15);
-  // node_t* arr = new node_t[15];
+  std::vector<node_t> arr(15);
   arr[0].split_value = 50.4594994;
   arr[0].child_offset = 2;
   arr[0].feature_index = 1 << 1;
@@ -261,11 +318,11 @@ int main(int, char**)
   const int NUM_ROWS = 550000;
   const int NUM_COLS = 30;
   const float MISSING_VAL = -999.0;
-  const std::string FILENAME = "../higgs-boson/data/test_raw.csv";
+  const std::string TEST_FILENAME = "../higgs-boson/data/test_raw.csv";
+  const std::string MODEL_FILENAME = "../higgs-boson/higgs-model-single-depth-3.txt";
 
-  // TODO: read model from file and organize model into correct data structure
-  std::unique_ptr<node_t[]> model = create_model_no_cover();
-  std::unique_ptr<float[]> test_inputs = read_test_data(FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
+  std::vector<node_t> model = read_model_no_cover(MODEL_FILENAME);
+  std::unique_ptr<float[]> test_inputs = read_test_data(TEST_FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
 
   std::ofstream predictions_outfile;
   const std::string predictions_fname = "predictions.csv";
