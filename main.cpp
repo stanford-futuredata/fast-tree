@@ -41,7 +41,7 @@ int main(int, char**)
   const float MISSING_VAL = -999.0;
   const std::string TEST_FILENAME = "../higgs-boson/data/test_raw.csv";
   const std::string MODEL_FILENAME = "../higgs-boson/higgs-model-single-depth-3.txt";
-  const std::string BENCHMARK = "preorder";
+  const std::string BENCHMARK = "preorder-cover";
 
   std::unique_ptr<float[]> test_inputs = read_test_data(TEST_FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
   std::ofstream predictions_outfile;
@@ -61,6 +61,15 @@ int main(int, char**)
     std::vector<node_t> model = read_model_preorder(MODEL_FILENAME);
     for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
       float prediction = evaluate_tree_regression_yelp_preorder(model, &test_inputs[i]);
+      predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
+      if (i % 1000 == 0) {
+        std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
+      }
+    }
+  } else if (BENCHMARK == "preorder-cover") {
+    std::vector<node_t> model = read_model_preorder(MODEL_FILENAME, true);
+    for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
+      float prediction = evaluate_tree_regression_yelp_preorder_cover(model, &test_inputs[i]);
       predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
       if (i % 1000 == 0) {
         std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;

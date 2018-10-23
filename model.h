@@ -1,6 +1,7 @@
 #ifndef model_h
 #define model_h
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -10,7 +11,7 @@
  *   --------------------------------------------------------
  * 1 |        Split condition / Leaf Value (32 bits)        |
  *   --------------------------------------------------------
- * 2 | Right Child Offset (31 bits) | False is left (1 bit) | (Zero iff node is leaf)
+ * 2 | Right Child Offset (31 bits) |  True is left (1 bit) | (Zero iff node is leaf)
  *   --------------------------------------------------------
  * 3 |  Feature Index (31 bits) | Default is right (1 bit)  | (Original ID iff node is leaf)
  *   --------------------------------------------------------
@@ -21,7 +22,7 @@ typedef struct {
   int feature_index = 0;
 } node_t;
 
-int process_line(std::ifstream& infile, std::vector<node_t>& vec)
+int process_line_cover(std::ifstream& infile, std::vector<node_t>& vec, std::vector<float>& cover_stats)
 {
   std::string line;
   if (!std::getline(infile, line)) {
@@ -39,10 +40,11 @@ int process_line(std::ifstream& infile, std::vector<node_t>& vec)
     const float split_value = std::stof(line.substr(5, comma_index - 5));
     vec.push_back({ split_value, 0, -1 });
 
-    return vec.size() - 1;
+    auto cover_index = line.find("cover=");
+    const float cover = std::stof(line.substr(cover_index + 6));
+    cover_stats.push_back(cover);
 
-    // auto cover_index = line.find("cover=");
-    // const float cover = std::stof(line.substr(cover_index + 6));
+    return vec.size() - 1;
   } else {
     auto f_index = line.find_first_of("f");
     auto lt_index = line.find_first_of("<");
@@ -63,8 +65,69 @@ int process_line(std::ifstream& infile, std::vector<node_t>& vec)
     comma_index = line.find_first_of(",");
     auto missing_value = stoi(line.substr(0, comma_index));
 
-    // auto cover_index = line.find("cover=");
-    // const float cover = std::stof(line.substr(cover_index + 6));
+    auto cover_index = line.find("cover=");
+    const float cover = std::stof(line.substr(cover_index + 6));
+    cover_stats.push_back(cover);
+
+    if (missing_value == yes_value) {
+      vec.push_back({ split_value, 0, feature_index << 1 });
+    } else if (missing_value == no_value) {
+      vec.push_back({ split_value, 0, ((feature_index << 1) | 0x1) });
+    }
+    const int curr_index = vec.size() - 1;
+    const int left_child_index = process_line_cover(infile, vec, cover_stats);  // process left subtree
+    const int right_child_index = process_line_cover(infile, vec, cover_stats); // process right subtree
+    if (cover_stats[right_child_index] > cover_stats[left_child_index]) {
+      // swap left and right child in array
+      std::swap_ranges(vec.begin() + left_child_index, vec.begin() + right_child_index, vec.begin() + right_child_index);
+      std::swap_ranges(cover_stats.begin() + left_child_index, cover_stats.begin() + right_child_index, cover_stats.begin() + right_child_index);
+      vec[curr_index].child_offset = ((right_child_index - curr_index) << 1) | 0x1;
+    } else {
+      // don't swap
+      vec[curr_index].child_offset = (right_child_index - curr_index) << 1;
+    }
+    return curr_index;
+  }
+}
+
+int process_line(std::ifstream& infile, std::vector<node_t>& vec)
+{
+  std::string line;
+  if (!std::getline(infile, line)) {
+    return 0;
+  }
+  auto start = line.find_first_not_of(" \t");
+  line = line.substr(start);
+
+  auto colon_index = line.find_first_of(":");
+  line = line.substr(colon_index + 1);
+
+  if (line.find("leaf=") == 0) {
+    // leaf node
+    auto comma_index = line.find_first_of(",");
+    const float split_value = std::stof(line.substr(5, comma_index - 5));
+    vec.push_back({ split_value, 0, -1 });
+
+    return vec.size() - 1;
+  } else {
+    auto f_index = line.find_first_of("f");
+    auto lt_index = line.find_first_of("<");
+    const int feature_index = std::stoi(line.substr(f_index + 1, lt_index - f_index));
+
+    auto rb_index = line.find_first_of("]");
+    const float split_value = std::stof(line.substr(lt_index + 1, rb_index - lt_index));
+    line = line.substr(rb_index + 6); // strip "] yes="
+
+    auto comma_index = line.find_first_of(",");
+    auto yes_value = stoi(line.substr(0, comma_index));
+    line = line.substr(comma_index + 4); // strip ",no="
+
+    comma_index = line.find_first_of(",");
+    auto no_value = stoi(line.substr(0, comma_index));
+    line = line.substr(comma_index + 9); // strip ",missing="
+
+    comma_index = line.find_first_of(",");
+    auto missing_value = stoi(line.substr(0, comma_index));
 
     if (missing_value == yes_value) {
       vec.push_back({ split_value, 0, feature_index << 1 });
@@ -79,7 +142,11 @@ int process_line(std::ifstream& infile, std::vector<node_t>& vec)
   }
 }
 
-std::vector<node_t> read_model_preorder(std::string filename)
+/**
+ * Read XGBoost model file and store nodes in preorder traversal order. If `use_cover`
+ * is true, swap left and right children based on cover statistic
+ **/
+std::vector<node_t> read_model_preorder(std::string filename, const bool use_cover = false)
 {
   std::ifstream infile(filename.c_str(), std::ios_base::in);
   std::vector<node_t> vec;
@@ -87,7 +154,12 @@ std::vector<node_t> read_model_preorder(std::string filename)
   if (infile) {
     std::string line;
     std::getline(infile, line); // consume "booster[0]" line
-    process_line(infile, vec);  // recursively build vector
+    if (use_cover) {
+      std::vector<float> cover_stats;
+      process_line_cover(infile, vec, cover_stats); // recursively build vector
+    } else {
+      process_line(infile, vec);
+    }
   }
   infile.close();
   return vec;
