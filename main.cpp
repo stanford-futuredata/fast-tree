@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <memory>
 #include <stdint.h>
 #include <string.h>
@@ -73,6 +74,9 @@ typedef struct {
   int feature_index = 0;
 } node_t;
 
+
+std::map<int, int> NODE_COUNTS;
+
 int evaluate_tree_simd(node_t* tree, float* test_input)
 {
 
@@ -105,36 +109,73 @@ int evaluate_tree_simd(node_t* tree, float* test_input)
 
 /**
  * Evaluate single test input using strategy from
- * https://www.sysml.cc/doc/89.pdf, but for tree that's not reordered based on
- * cover statistic. The right child offset is always stored in child_offset
- * field; the left child offset is always in the same relative location to the
- * parent node
+ * https://www.sysml.cc/doc/89.pdf, but without cover statistic re-ordering.
+ * The right child offset is always stored in `child_offset`; the left child
+ * offset is always adjacent to the current node
  **/
-float evaluate_tree_regression_yelp_no_cover(std::vector<node_t>& tree, float* test_input)
+float evaluate_tree_regression_yelp_preorder(std::vector<node_t>& tree, float* test_input)
 {
-  int curr_offset = 0;
-  node_t curr = tree[curr_offset];
+  int curr_index = 0;
+  node_t curr = tree[curr_index];
   while (curr.child_offset != 0) { // while the current node is not a leaf
+    NODE_COUNTS[curr_index]++;
     const int feature_index = DROP_LAST_N(curr.feature_index, 1);
     const float value = test_input[feature_index];
     if (std::isnan(value)) {
       // missing value
       if (IS_SET(curr.feature_index, 0)) {
         // default is right branch
-        curr_offset = curr.child_offset;
+        curr_index = curr.child_offset;
       } else {
         // default is left branch
-        curr_offset = curr_offset * 2 + 1;
+        curr_index++;
       }
     } else if (test_input[feature_index] < curr.split_value) {
       // left branch
-      curr_offset = curr_offset * 2 + 1;
+      curr_index++;
     } else {
       // right branch
-      curr_offset = curr.child_offset;
+      curr_index = curr.child_offset;
     }
-    curr = tree[curr_offset];
+    curr = tree[curr_index];
   }
+  NODE_COUNTS[curr_index]++; // for leaf node
+  return curr.split_value;
+}
+
+/**
+ * Evaluate single test input using strategy from
+ * https://www.sysml.cc/doc/89.pdf, but for a tree that's breadth-first ordered
+ * The right child offset is always stored in `child_offset`; the left child
+ * offset is always 2 * curr_index + 1 from the current node
+ **/
+float evaluate_tree_regression_yelp_breadth_first(std::vector<node_t>& tree, float* test_input)
+{
+  int curr_index = 0;
+  node_t curr = tree[curr_index];
+  while (curr.child_offset != 0) { // while the current node is not a leaf
+    NODE_COUNTS[curr_index]++;
+    const int feature_index = DROP_LAST_N(curr.feature_index, 1);
+    const float value = test_input[feature_index];
+    if (std::isnan(value)) {
+      // missing value
+      if (IS_SET(curr.feature_index, 0)) {
+        // default is right branch
+        curr_index = curr.child_offset;
+      } else {
+        // default is left branch
+        curr_index = curr_index * 2 + 1;
+      }
+    } else if (test_input[feature_index] < curr.split_value) {
+      // left branch
+      curr_index = curr_index * 2 + 1;
+    } else {
+      // right branch
+      curr_index = curr.child_offset;
+    }
+    curr = tree[curr_index];
+  }
+  NODE_COUNTS[curr_index]++; // for leaf node
   return curr.split_value;
 }
 
@@ -144,56 +185,131 @@ int evaluate_tree_regression_treelite(node_t*, float*)
   return 0;
 }
 
-std::vector<node_t> read_model_no_cover(std::string filename)
+int process_line(std::ifstream & infile, std::vector<node_t> & vec)
+{
+  std::string line;
+  if (!std::getline(infile, line)) {
+    return 0;
+  }
+  auto start = line.find_first_not_of(" \t");
+  line = line.substr(start);
+
+  auto colon_index = line.find_first_of(":");
+  line = line.substr(colon_index + 1);
+
+  if (line.find("leaf=") == 0) {
+    // leaf node
+    auto comma_index = line.find_first_of(",");
+    const float split_value = std::stof(line.substr(5, comma_index - 5));
+    vec.push_back({ split_value, 0, -1 });
+
+    return vec.size() - 1;
+
+    // auto cover_index = line.find("cover=");
+    // const float cover = std::stof(line.substr(cover_index + 6));
+  } else {
+    auto f_index = line.find_first_of("f");
+    auto lt_index = line.find_first_of("<");
+    const int feature_index = std::stoi(line.substr(f_index + 1, lt_index - f_index));
+
+    auto rb_index = line.find_first_of("]");
+    const float split_value = std::stof(line.substr(lt_index + 1, rb_index - lt_index));
+    line = line.substr(rb_index + 6); // strip "] yes="
+
+    auto comma_index = line.find_first_of(",");
+    auto yes_value = stoi(line.substr(0, comma_index));
+    line = line.substr(comma_index + 4); // strip ",no="
+
+    comma_index = line.find_first_of(",");
+    auto no_value = stoi(line.substr(0, comma_index));
+    line = line.substr(comma_index + 9); // strip ",missing="
+
+    comma_index = line.find_first_of(",");
+    auto missing_value = stoi(line.substr(0, comma_index));
+
+    // auto cover_index = line.find("cover=");
+    // const float cover = std::stof(line.substr(cover_index + 6));
+
+    if (missing_value == yes_value) {
+      vec.push_back({ split_value, 0, feature_index << 1 });
+    } else if (missing_value == no_value) {
+      vec.push_back({ split_value, 0, ((feature_index << 1) | 0x1) });
+    }
+    const int curr_index = vec.size() - 1;
+    process_line(infile, vec); // process left subtree
+    const int right_child_index = process_line(infile, vec); // process right subtree
+    vec[curr_index].child_offset = right_child_index;
+    return curr_index;
+  }
+}
+
+std::vector<node_t> read_model_preorder(std::string filename)
 {
   std::ifstream infile(filename.c_str(), std::ios_base::in);
   std::vector<node_t> vec;
 
-  std::string line;
   if (infile) {
-    while (std::getline(infile, line)) {
-      if (line.find("booster[") == 0) {
-        continue;
-      }
-      auto start = line.find_first_not_of(" \t");
-      line = line.substr(start);
+    std::string line;
+    std::getline(infile, line); // consume "booster[0]" line
+    process_line(infile, vec); // recursively build vector
+  }
+  infile.close();
+  return vec;
+}
 
-      auto colon_index = line.find_first_of(":");
-      const int node_index = std::stoi(line.substr(0, colon_index));
-      if (node_index >= (int)vec.size()) {
-        vec.resize(node_index + 1);
-      }
-      line = line.substr(colon_index + 1);
+std::vector<node_t> read_model_breadth_first(std::string filename)
+{
+  std::ifstream infile(filename.c_str(), std::ios_base::in);
+  std::vector<node_t> vec;
 
-      if (line.find("leaf=") == 0) {
-        // leaf node
-        auto comma_index = line.find_first_of(",");
-        const float split_value = std::stof(line.substr(5, comma_index - 5));
-        vec[node_index] = { split_value, 0, -1 };
+  if (!infile) {
+    return vec;
+  }
+  std::string line;
+  while (std::getline(infile, line)) {
+    if (line.find("booster[") == 0) {
+      continue;
+    }
+    auto start = line.find_first_not_of(" \t");
+    line = line.substr(start);
 
-      } else {
-        auto f_index = line.find_first_of("f");
-        auto lt_index = line.find_first_of("<");
-        const int feature_index = std::stoi(line.substr(f_index + 1, lt_index - f_index));
+    auto colon_index = line.find_first_of(":");
+    const int node_index = std::stoi(line.substr(0, colon_index));
+    if (node_index >= (int)vec.size()) {
+      vec.resize(node_index + 1);
+    }
+    line = line.substr(colon_index + 1);
 
-        auto rb_index = line.find_first_of("]");
-        const float split_value = std::stof(line.substr(lt_index + 1, rb_index - lt_index));
-        line = line.substr(rb_index + 6); // strip "] yes="
+    if (line.find("leaf=") == 0) {
+      // leaf node
+      auto comma_index = line.find_first_of(",");
+      const float split_value = std::stof(line.substr(5, comma_index - 5));
+      vec[node_index] = { split_value, 0, -1 };
 
-        auto comma_index = line.find_first_of(",");
-        auto yes_value = stoi(line.substr(0, comma_index));
-        line = line.substr(comma_index + 4); // strip ",no="
-        comma_index = line.find_first_of(",");
-        auto no_value = stoi(line.substr(0, comma_index));
-        line = line.substr(comma_index + 9); // strip ",missing="
-        comma_index = line.find_first_of(",");
-        auto missing_value = stoi(line.substr(0, comma_index));
+    } else {
+      auto f_index = line.find_first_of("f");
+      auto lt_index = line.find_first_of("<");
+      const int feature_index = std::stoi(line.substr(f_index + 1, lt_index - f_index));
 
-        if (missing_value == yes_value) {
-          vec[node_index] = { split_value, node_index * 2 + 2, feature_index << 1 };
-        } else if (missing_value == no_value) {
-          vec[node_index] = { split_value, node_index * 2 + 2, ((feature_index << 1) | 0x1) };
-        }
+      auto rb_index = line.find_first_of("]");
+      const float split_value = std::stof(line.substr(lt_index + 1, rb_index - lt_index));
+      line = line.substr(rb_index + 6); // strip "] yes="
+
+      auto comma_index = line.find_first_of(",");
+      auto yes_value = stoi(line.substr(0, comma_index));
+      line = line.substr(comma_index + 4); // strip ",no="
+
+      comma_index = line.find_first_of(",");
+      auto no_value = stoi(line.substr(0, comma_index));
+      line = line.substr(comma_index + 9); // strip ",missing="
+
+      comma_index = line.find_first_of(",");
+      auto missing_value = stoi(line.substr(0, comma_index));
+
+      if (missing_value == yes_value) {
+        vec[node_index] = { split_value, node_index * 2 + 2, feature_index << 1 };
+      } else if (missing_value == no_value) {
+        vec[node_index] = { split_value, node_index * 2 + 2, ((feature_index << 1) | 0x1) };
       }
     }
   }
@@ -220,7 +336,7 @@ std::vector<node_t> read_model_no_cover(std::string filename)
  * 			14:leaf=-0.0119630694,cover=923.46814
  **/
 // child offset always points to the right child
-std::vector<node_t> create_model_no_cover()
+std::vector<node_t> create_model_breadth_first()
 {
   std::vector<node_t> arr(15);
   arr[0].split_value = 50.4594994;
@@ -321,19 +437,22 @@ int main(int, char**)
   const std::string TEST_FILENAME = "../higgs-boson/data/test_raw.csv";
   const std::string MODEL_FILENAME = "../higgs-boson/higgs-model-single-depth-3.txt";
 
-  std::vector<node_t> model = read_model_no_cover(MODEL_FILENAME);
+  std::vector<node_t> model = read_model_breadth_first(MODEL_FILENAME);
   std::unique_ptr<float[]> test_inputs = read_test_data(TEST_FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
 
   std::ofstream predictions_outfile;
   const std::string predictions_fname = "predictions.csv";
   predictions_outfile.open(predictions_fname);
   for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
-    float prediction = evaluate_tree_regression_yelp_no_cover(model, &test_inputs[i]);
+    float prediction = evaluate_tree_regression_yelp_breadth_first(model, &test_inputs[i]);
     predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
     if (i % 1000 == 0) {
       std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
     }
   }
   predictions_outfile.close();
+  for (const auto & key_value : NODE_COUNTS) {
+    std::cout << "Node " << key_value.first << " has true cover " << key_value.second << std::endl;
+  }
   return 0;
 }
