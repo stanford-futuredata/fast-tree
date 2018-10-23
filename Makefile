@@ -1,7 +1,7 @@
 CC=clang++
-CFLAGS=-std=c++11 -march=native -Wall -Wno-unused-function
+CFLAGS=-std=c++14 -march=native -Wall -Wno-unused-function
 INCLUDES=
-TARGET=main
+TARGET=fast-tree
 
 .PHONY: all debug asm clean
 

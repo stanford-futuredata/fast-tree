@@ -1,3 +1,6 @@
+# YouCompleteMe
+.ycm_extra_conf.py
+
 # Vim
 *.swp
 
@@ -30,7 +33,7 @@
 *.lib
 
 # Executables
-main
+fast-tree
 *.exe
 *.out
 *.app

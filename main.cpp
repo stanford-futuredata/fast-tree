@@ -2,9 +2,12 @@
 #include <assert.h>
 #include <bitset>
 #include <cmath>
+#include <fstream>
 #include <immintrin.h>
+#include <iomanip>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <stdint.h>
 #include <string.h>
 
@@ -106,7 +109,7 @@ int evaluate_tree_simd(node_t* tree, float* test_input)
  * field; the left child offset is always in the same relative location to the
  * parent node
  **/
-float evaluate_tree_regression_yelp_no_cover(node_t* tree, float* test_input)
+float evaluate_tree_regression_yelp_no_cover(std::unique_ptr<node_t[]>& tree, float* test_input)
 {
   int curr_offset = 0;
   node_t curr = tree[curr_offset];
@@ -129,7 +132,6 @@ float evaluate_tree_regression_yelp_no_cover(node_t* tree, float* test_input)
       // right branch
       curr_offset = curr.child_offset;
     }
-    std::cout << "Offset: " << curr_offset << std::endl;
     curr = tree[curr_offset];
   }
   return curr.split_value;
@@ -159,10 +161,11 @@ int evaluate_tree_regression_treelite(node_t*, float*)
  * 			13:leaf=-0.183263466,cover=93676.1719
  * 			14:leaf=-0.0119630694,cover=923.46814
  **/
-node_t* create_model_no_cover()
+// child offset always points to the right child
+std::unique_ptr<node_t[]> create_model_no_cover()
 {
-  // child offset always points to the right child
-  node_t* arr = new node_t[15];
+  std::unique_ptr<node_t[]> arr = std::make_unique<node_t[]>(15);
+  // node_t* arr = new node_t[15];
   arr[0].split_value = 50.4594994;
   arr[0].child_offset = 2;
   arr[0].feature_index = 1 << 1;
@@ -204,11 +207,11 @@ node_t* create_model_no_cover()
   arr[9].child_offset = 0;
   arr[9].feature_index = -1;
 
-  arr[10].split_value = 0.160050601;
+  arr[10].split_value = -0.160050601;
   arr[10].child_offset = 0;
   arr[10].feature_index = -1;
 
-  arr[11].split_value = 0.0962326154;
+  arr[11].split_value = -0.0962326154;
   arr[11].child_offset = 0;
   arr[11].feature_index = -1;
 
@@ -226,45 +229,54 @@ node_t* create_model_no_cover()
   return arr;
 }
 
+std::unique_ptr<float[]> read_test_data(std::string filename, int num_rows, int num_cols, const float missing_val)
+{
+  std::ifstream infile(filename.c_str(), std::ios_base::in);
+  std::unique_ptr<float[]> values = std::make_unique<float[]>(num_rows * num_cols);
+
+  std::string buffer;
+  if (infile) {
+    for (int i = 0; i < num_rows; i++) {
+      float* d = &values[i * num_cols];
+      for (int j = 0; j < num_cols; j++) {
+        float f;
+        infile >> f;
+        if (f == missing_val) {
+          f = std::numeric_limits<float>::quiet_NaN();
+        }
+        if (j != num_cols - 1) {
+          std::getline(infile, buffer, ',');
+        }
+        d[j] = f;
+      }
+      std::getline(infile, buffer);
+    }
+  }
+  infile.close();
+  return values;
+}
+
 int main(int, char**)
 {
-  node_t* model = create_model_no_cover();
-  float test_input[30] = { std::numeric_limits<float>::quiet_NaN(),
-    79.589,
-    23.916,
-    3.036,
-    std::numeric_limits<float>::quiet_NaN(),
-    std::numeric_limits<float>::quiet_NaN(),
-    std::numeric_limits<float>::quiet_NaN(),
-    0.903,
-    3.036,
-    56.018,
-    1.536,
-    -1.404,
-    std::numeric_limits<float>::quiet_NaN(),
-    22.088,
-    -0.54,
-    -0.609,
-    33.93,
-    -0.504,
-    -1.511,
-    48.509,
-    2.022,
-    98.556,
-    0,
-    std::numeric_limits<float>::quiet_NaN(),
-    std::numeric_limits<float>::quiet_NaN(),
-    std::numeric_limits<float>::quiet_NaN(),
-    std::numeric_limits<float>::quiet_NaN(),
-    std::numeric_limits<float>::quiet_NaN(),
-    -0.0 };
-  float prediction = evaluate_tree_regression_yelp_no_cover(model, test_input);
-  std::cout << "Prediction: " << prediction << std::endl;
-  delete[] model;
-  // 1) Read model from file
-  // 2) Organize model into correct data structure
-  // 3) Read test inputs
-  // 4) Evaluate test inputs one at a time
-  // 5) Evaluate inputs in batch
+  const int NUM_ROWS = 550000;
+  const int NUM_COLS = 30;
+  const float MISSING_VAL = -999.0;
+  const std::string FILENAME = "../higgs-boson/data/test_raw.csv";
+
+  // TODO: read model from file and organize model into correct data structure
+  std::unique_ptr<node_t[]> model = create_model_no_cover();
+  std::unique_ptr<float[]> test_inputs = read_test_data(FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
+
+  std::ofstream predictions_outfile;
+  const std::string predictions_fname = "predictions.csv";
+  predictions_outfile.open(predictions_fname);
+  for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
+    float prediction = evaluate_tree_regression_yelp_no_cover(model, &test_inputs[i]);
+    predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
+    if (i % 1000 == 0) {
+      std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
+    }
+  }
+  predictions_outfile.close();
   return 0;
 }
