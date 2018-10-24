@@ -1,5 +1,6 @@
 #include "eval.h"
 #include "model.h"
+#include "timing.h"
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -43,6 +44,7 @@ int main(int, char**)
   const std::string MODEL_FILENAME = "../higgs-boson/higgs-model-single-depth-3.txt";
   const std::string BENCHMARK = "preorder-cover";
 
+  std::cout << "Benchmark: " << BENCHMARK << std::endl;
   std::unique_ptr<float[]> test_inputs = read_test_data(TEST_FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
   std::ofstream predictions_outfile;
   const std::string predictions_fname = "predictions.csv";
@@ -50,31 +52,43 @@ int main(int, char**)
 
   if (BENCHMARK == "breadth-first") {
     std::vector<node_t> model = read_model_breadth_first(MODEL_FILENAME);
+    bench_timer_t start = time_start();
     for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
       float prediction = evaluate_tree_regression_yelp_breadth_first(model, &test_inputs[i]);
       predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
-      if (i % 1000 == 0) {
-        std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
-      }
+      // if (i % 1000 == 0) {
+      //   std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
+      // }
     }
+    const double time = time_stop(start);
+    std::cout << "Total prediction time: " << time << "s" << std::endl;
+
   } else if (BENCHMARK == "preorder") {
     std::vector<node_t> model = read_model_preorder(MODEL_FILENAME);
+    bench_timer_t start = time_start();
     for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
       float prediction = evaluate_tree_regression_yelp_preorder(model, &test_inputs[i]);
       predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
-      if (i % 1000 == 0) {
-        std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
-      }
+      // if (i % 1000 == 0) {
+      //   std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
+      // }
     }
+    const double time = time_stop(start);
+    std::cout << "Total prediction time: " << time << "s" << std::endl;
+
   } else if (BENCHMARK == "preorder-cover") {
     std::vector<node_t> model = read_model_preorder(MODEL_FILENAME, true);
+    bench_timer_t start = time_start();
     for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
       float prediction = evaluate_tree_regression_yelp_preorder_cover(model, &test_inputs[i]);
       predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
-      if (i % 1000 == 0) {
-        std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
-      }
+      // if (i % 1000 == 0) {
+      //   std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
+      // }
     }
+    const double time = time_stop(start);
+    std::cout << "Total prediction time: " << time << "s" << std::endl;
+
   }
 
   predictions_outfile.close();
