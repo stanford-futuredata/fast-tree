@@ -13,9 +13,55 @@
 
 std::map<int, int> NODE_COUNTS;
 
-int evaluate_tree_regression_treelite(node_t*, float*)
+/**
+ * booster[0]:
+ * 0:[f1<50.4594994] yes=1,no=2,missing=1,gain=540253,cover=452099.844
+ * 	1:[f0<90.763504] yes=3,no=4,missing=3,gain=74883.8438,cover=240563.969
+ * 		3:[f7<2.78450012] yes=7,no=8,missing=7,gain=19625.002,cover=38636.8867
+ * 			7:leaf=-0.0825883001,cover=23387.2773
+ * 			8:leaf=0.063217625,cover=15249.6104
+ * 		4:[f2<122.399002] yes=9,no=10,missing=9,gain=67479.4688,cover=201927.078
+ * 			9:leaf=0.138557851,cover=194053.016
+ * 			10:leaf=-0.160050601,cover=7874.06641
+ * 	2:[f0<163.686493] yes=5,no=6,missing=6,gain=72340.4062,cover=211535.859
+ * 		5:[f11<0.522500038] yes=11,no=12,missing=11,gain=46015.3516,cover=116936.227
+ * 			11:leaf=-0.0962326154,cover=92482.0312
+ * 			12:leaf=0.0580137558,cover=24454.1953
+ * 		6:[f8<79.897995] yes=13,no=14,missing=13,gain=2682.90625,cover=94599.6406
+ * 			13:leaf=-0.183263466,cover=93676.1719
+ * 			14:leaf=-0.0119630694,cover=923.46814
+ **/
+float evaluate_tree_regression_treelite(float* test_input)
 {
-  // TODO
+  if (std::isnan(test_input[1]) || test_input[1] < 50.4594994) {
+    if (std::isnan(test_input[0]) || test_input[0] < 90.763504) {
+      if (std::isnan(test_input[7]) || test_input[7] < 2.78450012) {
+        return -0.0825883001;
+      } else {
+        return 0.063217625;
+      }
+    } else {
+      if (std::isnan(test_input[2]) || test_input[2] < 122.399002) {
+        return 0.138557851;
+      } else {
+        return -0.160050601;
+      }
+    }
+  } else {
+    if (std::isnan(test_input[0]) || test_input[0] >= 163.686493) {
+      if (std::isnan(test_input[8]) || test_input[8] < 79.897995) {
+        return -0.183263466;
+      } else {
+        return -0.0119630694;
+      }
+    } else {
+      if (std::isnan(test_input[11]) || test_input[11] < 0.522500038) {
+        return -0.0962326154;
+      } else {
+        return 0.0580137558;
+      }
+    }
+  }
   return 0;
 }
 
@@ -83,7 +129,6 @@ float evaluate_tree_regression_yelp_preorder_cover(std::vector<node_t>& tree, fl
   NODE_COUNTS[curr_index]++; // for leaf node
   return curr.split_value;
 }
-
 
 /**
  * Evaluate single test input using strategy from
