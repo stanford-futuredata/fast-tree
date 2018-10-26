@@ -47,12 +47,10 @@
 // #define _CMP_GE_OQ    0x1d /* Greater-than-or-equal (ordered, non-signaling)  */
 // #define _CMP_GT_OQ    0x1e /* Greater-than (ordered, non-signaling)  */
 // #define _CMP_TRUE_US  0x1f /* True (unordered, signaling)  */
-float evaluate_tree_simd(std::vector<node_t>& tree, float *lookup_table, float* test_input)
+float evaluate_tree_simd(std::vector<node_t>& tree, float *split_values, float *lookup_table, float* test_input)
 {
-  float split_values[8];
   float test_values[8];
   for (int i = 0; i < 7; ++i) {
-    split_values[i] = tree[i].split_value;
     float test_value = test_input[tree[i].feature_index >> 1];
     if (std::isnan(test_value)) {
       if (i == 2)
@@ -62,7 +60,6 @@ float evaluate_tree_simd(std::vector<node_t>& tree, float *lookup_table, float* 
     }
     test_values[i] = test_value;
   }
-  split_values[7] = 0.0;
   test_values[7] = 0.0;
 
   __m256 split_register = _mm256_loadu_ps(split_values);

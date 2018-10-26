@@ -36,14 +36,18 @@ std::unique_ptr<float[]> read_test_data(std::string filename, int num_rows, int 
   return values;
 }
 
-int main(int, char**)
+int main(int argc, char** argv)
 {
+  if (argc <= 1) {
+    std::cout << "Usage: ./fast-tree {breadth-first | preorder | preorder-cover | treelite | simd}" << std::endl;
+    exit(1);
+  }
   const int NUM_ROWS = 550000;
   const int NUM_COLS = 30;
   const float MISSING_VAL = -999.0;
   const std::string TEST_FILENAME = "../higgs-boson/data/test_raw.csv";
   const std::string MODEL_FILENAME = "../higgs-boson/higgs-model-single-depth-3.txt";
-  const std::string BENCHMARK = "simd";
+  const std::string BENCHMARK = argv[1];
 
   std::cout << "Benchmark: " << BENCHMARK << std::endl;
   std::unique_ptr<float[]> test_inputs = read_test_data(TEST_FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
@@ -124,9 +128,15 @@ int main(int, char**)
         // mask & 0 == 0
         lookup_table[i] = -0.0119630694;
     }
+    float split_values[8];
+    for (int i = 0; i < 7; ++i) {
+    split_values[i] = model[i].split_value;
+    }
+    split_values[7] = 0.0;
+
     bench_timer_t start = time_start();
     for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
-      float prediction = evaluate_tree_simd(model, lookup_table, &test_inputs[i]);
+      float prediction = evaluate_tree_simd(model, split_values, lookup_table, &test_inputs[i]);
       predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
       // if (i % 1000 == 0) {
       //   std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
@@ -134,6 +144,9 @@ int main(int, char**)
     }
     const double time = time_stop(start);
     std::cout << "Total prediction time: " << time << "s" << std::endl;
+  } else {
+    std::cout << "Not a valid benchmark" << std::endl;
+    exit(1);
   }
 
   predictions_outfile.close();
