@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "eval-simd.h"
 #include "model.h"
 #include "timing.h"
 #include <fstream>
@@ -42,7 +43,7 @@ int main(int, char**)
   const float MISSING_VAL = -999.0;
   const std::string TEST_FILENAME = "../higgs-boson/data/test_raw.csv";
   const std::string MODEL_FILENAME = "../higgs-boson/higgs-model-single-depth-3.txt";
-  const std::string BENCHMARK = "treelite";
+  const std::string BENCHMARK = "simd";
 
   std::cout << "Benchmark: " << BENCHMARK << std::endl;
   std::unique_ptr<float[]> test_inputs = read_test_data(TEST_FILENAME, NUM_ROWS, NUM_COLS, MISSING_VAL);
@@ -100,6 +101,20 @@ int main(int, char**)
     }
     const double time = time_stop(start);
     std::cout << "Total prediction time: " << time << "s" << std::endl;
+
+  } else if (BENCHMARK == "simd") {
+    std::vector<node_t> model = read_model_breadth_first(MODEL_FILENAME);
+    bench_timer_t start = time_start();
+    for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
+      float prediction = evaluate_tree_simd(model, &test_inputs[i]);
+      predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
+      // if (i % 1000 == 0) {
+      //   std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
+      // }
+    }
+    const double time = time_stop(start);
+    std::cout << "Total prediction time: " << time << "s" << std::endl;
+
   }
 
   predictions_outfile.close();
