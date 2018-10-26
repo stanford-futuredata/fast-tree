@@ -47,7 +47,7 @@
 // #define _CMP_GE_OQ    0x1d /* Greater-than-or-equal (ordered, non-signaling)  */
 // #define _CMP_GT_OQ    0x1e /* Greater-than (ordered, non-signaling)  */
 // #define _CMP_TRUE_US  0x1f /* True (unordered, signaling)  */
-float evaluate_tree_simd(std::vector<node_t>& tree, float* test_input)
+float evaluate_tree_simd(std::vector<node_t>& tree, float *lookup_table, float* test_input)
 {
   float split_values[8];
   float test_values[8];
@@ -68,26 +68,7 @@ float evaluate_tree_simd(std::vector<node_t>& tree, float* test_input)
   __m256 split_register = _mm256_loadu_ps(split_values);
   __m256 test_register = _mm256_loadu_ps(test_values);
   uint8_t mask = _mm256_movemask_ps(_mm256_cmp_ps(test_register, split_register, _CMP_LT_OS));
-  if ((mask & 11) == 11)
-    return -0.0825883001;
-  if ((mask & 3) == 3)
-    return 0.063217625;
-  if ((mask & 17) == 17)
-    return 0.138557851;
-  if ((mask & 1) == 1)
-    return -0.160050601;
-  if ((mask & 36) == 36)
-    return -0.09623261541;
-  if ((mask & 4) == 4)
-    return 0.0580137558;
-  if ((mask & 64) == 64)
-    return -0.183263466;
-  return -0.0119630694; // mask & 0 == 0
-  // std::bitset<8> bits(mask);
-  // std::cout << "mask: " << bits << std::endl;
-  // uint8_t opp_mask = ~(mask);
-  // std::bitset<8> opp_bits(opp_mask);
-  // std::cout << "opp mask: " << opp_bits << std::endl;
+  return lookup_table[mask];
 }
 
 /**-0.18326346576213837
@@ -132,5 +113,11 @@ float evaluate_tree_simd(std::vector<node_t>& tree, float* test_input)
   std::cout << "count: " << count << std::endl;
   return count;
   */
+
+  // std::bitset<8> bits(mask);
+  // std::cout << "mask: " << bits << std::endl;
+  // uint8_t opp_mask = ~(mask);
+  // std::bitset<8> opp_bits(opp_mask);
+  // std::cout << "opp mask: " << opp_bits << std::endl;
 
 #endif

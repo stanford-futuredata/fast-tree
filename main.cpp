@@ -1,5 +1,5 @@
-#include "eval.h"
 #include "eval-simd.h"
+#include "eval.h"
 #include "model.h"
 #include "timing.h"
 #include <fstream>
@@ -104,9 +104,29 @@ int main(int, char**)
 
   } else if (BENCHMARK == "simd") {
     std::vector<node_t> model = read_model_breadth_first(MODEL_FILENAME);
+    float lookup_table[128];
+    for (int i = 0; i < 128; ++i) {
+      if ((i & 11) == 11)
+        lookup_table[i] = -0.0825883001;
+      else if ((i & 3) == 3)
+        lookup_table[i] = 0.063217625;
+      else if ((i & 17) == 17)
+        lookup_table[i] = 0.138557851;
+      else if ((i & 1) == 1)
+        lookup_table[i] = -0.160050601;
+      else if ((i & 36) == 36)
+        lookup_table[i] = -0.09623261541;
+      else if ((i & 4) == 4)
+        lookup_table[i] = 0.0580137558;
+      else if ((i & 64) == 64)
+        lookup_table[i] = -0.183263466;
+      else
+        // mask & 0 == 0
+        lookup_table[i] = -0.0119630694;
+    }
     bench_timer_t start = time_start();
     for (int i = 0; i < NUM_ROWS * NUM_COLS; i += NUM_COLS) {
-      float prediction = evaluate_tree_simd(model, &test_inputs[i]);
+      float prediction = evaluate_tree_simd(model, lookup_table, &test_inputs[i]);
       predictions_outfile << std::fixed << std::setprecision(17) << prediction << std::endl;
       // if (i % 1000 == 0) {
       //   std::cout << "Prediction " << i / NUM_COLS << ": " << std::fixed << std::setprecision(17) << prediction << std::endl;
@@ -114,7 +134,6 @@ int main(int, char**)
     }
     const double time = time_stop(start);
     std::cout << "Total prediction time: " << time << "s" << std::endl;
-
   }
 
   predictions_outfile.close();
